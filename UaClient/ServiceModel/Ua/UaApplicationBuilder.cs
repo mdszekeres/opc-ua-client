@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -87,6 +88,12 @@ namespace Workstation.ServiceModel.Ua
             }
 
             this.certificateStore = new DirectoryStore(path, acceptAllRemoteCertificates, createLocalCertificateIfNotExist);
+            return this;
+        }
+
+        public UaApplicationBuilder SetWindowsCertificateStore(StoreName storeName, StoreLocation storeLocation)
+        {
+            this.certificateStore = new WindowsCertificateStore(storeName, storeLocation);
             return this;
         }
 
