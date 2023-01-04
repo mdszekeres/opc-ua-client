@@ -91,9 +91,21 @@ namespace Workstation.ServiceModel.Ua
             return this;
         }
 
-        public UaApplicationBuilder SetWindowsCertificateStore(StoreName storeName, StoreLocation storeLocation)
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="storeName"></param>
+        /// <param name="storeLocation"></param>
+        /// <param name="thumbprint"></param>
+        /// <returns></returns>
+        public UaApplicationBuilder SetWindowsCertificateStore(StoreName storeName, StoreLocation storeLocation, string thumbprint)
         {
-            this.certificateStore = new WindowsCertificateStore(storeName, storeLocation);
+            if (string.IsNullOrEmpty(thumbprint))
+            {
+                throw new ArgumentNullException(nameof(thumbprint));
+            }
+
+            this.certificateStore = new WindowsCertificateStore(storeName, storeLocation, thumbprint);
             return this;
         }
 

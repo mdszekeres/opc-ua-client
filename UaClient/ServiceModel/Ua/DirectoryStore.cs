@@ -4,6 +4,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -14,12 +15,14 @@ using Org.BouncyCastle.Crypto.Operators;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.OpenSsl;
+using Org.BouncyCastle.Pkcs;
 using Org.BouncyCastle.Pkix;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Security.Certificates;
 using Org.BouncyCastle.X509;
 using Org.BouncyCastle.X509.Extension;
 using Org.BouncyCastle.X509.Store;
+using X509Certificate = Org.BouncyCastle.X509.X509Certificate;
 
 namespace Workstation.ServiceModel.Ua
 {
@@ -61,7 +64,7 @@ namespace Workstation.ServiceModel.Ua
         public bool CreateLocalCertificateIfNotExist { get; }
 
         /// <inheritdoc/>
-        public async Task<(X509Certificate? Certificate, RsaKeyParameters? Key)> GetLocalCertificateAsync(ApplicationDescription applicationDescription, ILogger? logger = null, CancellationToken token = default)
+        public async Task<(X509Certificate2? Certificate, RsaKeyParameters? Key)> GetLocalCertificateAsync(ApplicationDescription applicationDescription, ILogger? logger = null, CancellationToken token = default)
         {
             if (applicationDescription == null)
             {
@@ -108,6 +111,12 @@ namespace Workstation.ServiceModel.Ua
 
             var crt = default(X509Certificate);
             var key = default(RsaKeyParameters);
+            
+            // used as new return cert
+            X509Certificate2 returnCrt;
+            string exportpw = Guid.NewGuid().ToString("x");
+            Pkcs12Store store = new Pkcs12StoreBuilder().Build();
+            AsymmetricCipherKeyPair kp = null;
 
             // Build 'own/certs' certificate store.
             var ownCerts = new Org.BouncyCastle.Utilities.Collections.HashSet();
@@ -155,6 +164,7 @@ namespace Workstation.ServiceModel.Ua
                                 if (keyPair != null)
                                 {
                                     key = keyPair.Private as RsaKeyParameters;
+                                    kp = keyPair;
                                 }
                             }
                         }
@@ -166,7 +176,20 @@ namespace Workstation.ServiceModel.Ua
             if (crt != null && key != null)
             {
                 logger?.LogTrace($"Found certificate with subject alt name '{applicationUri}'.");
-                return (crt, key);
+
+                #region x509 found cert conversion
+
+                store.SetKeyEntry($"{subjectName}_key", new AsymmetricKeyEntry(kp.Private), new[] { new X509CertificateEntry(crt) });
+
+                using (var ms = new System.IO.MemoryStream())
+                {
+                    store.Save(ms, exportpw.ToCharArray(), _rng);
+                    returnCrt = new X509Certificate2(ms.ToArray(), exportpw, X509KeyStorageFlags.Exportable);
+                }
+
+                #endregion
+
+                return (returnCrt, key);
             }
 
             if (!CreateLocalCertificateIfNotExist)
@@ -178,7 +201,7 @@ namespace Workstation.ServiceModel.Ua
             var subjectDN = new X509Name(subjectName);
 
             // Create a keypair.
-            var kp = await Task.Run<AsymmetricCipherKeyPair>(() =>
+            kp = await Task.Run<AsymmetricCipherKeyPair>(() =>
             {
                 RsaKeyPairGenerator kg = new RsaKeyPairGenerator();
                 kg.Init(new KeyGenerationParameters(_rng, 2048));
@@ -227,7 +250,23 @@ namespace Workstation.ServiceModel.Ua
                 true,
                 new ExtendedKeyUsage(KeyPurposeID.IdKPClientAuth, KeyPurposeID.IdKPServerAuth));
 
-            crt = cg.Generate(new Asn1SignatureFactory("SHA256WITHRSA", key, _rng));
+            // Need to convert the new certification
+            #region x509 cert conversion
+
+            const string signatureAlgorithm = "SHA256WithRSA";
+            var signatureFactory = new Asn1SignatureFactory(signatureAlgorithm, kp.Private);
+
+            var tmpCert = cg.Generate(signatureFactory);
+
+            store.SetKeyEntry($"{subjectName}_key", new AsymmetricKeyEntry(kp.Private), new[] { new X509CertificateEntry(tmpCert) });
+
+            using (var ms = new System.IO.MemoryStream())
+            {
+                store.Save(ms, exportpw.ToCharArray(), _rng);
+                returnCrt = new X509Certificate2(ms.ToArray(), exportpw, X509KeyStorageFlags.Exportable);
+            }
+
+            #endregion x509 cert conversion
 
             logger?.LogTrace($"Created certificate with subject alt name '{applicationUri}'.");
 
@@ -263,11 +302,11 @@ namespace Workstation.ServiceModel.Ua
                 pemwriter.WriteObject(crt);
             }
 
-            return (crt, key);
+            return (returnCrt, key);
         }
 
         /// <inheritdoc/>
-        public Task<bool> ValidateRemoteCertificateAsync(X509Certificate target, ILogger? logger = null, CancellationToken token = default)
+        public Task<bool> ValidateRemoteCertificateAsync(X509Certificate2 target, ILogger? logger = null, CancellationToken token = default)
         {
             if (AcceptAllRemoteCertificates)
             {
@@ -279,7 +318,7 @@ namespace Workstation.ServiceModel.Ua
                 throw new ArgumentNullException(nameof(target));
             }
 
-            if (!target.IsValidNow)
+            if (!target.Verify())
             {
                 logger?.LogError($"Error validatingRemoteCertificate. Certificate is expired or not yet valid.");
                 StoreInRejectedFolder(target);
@@ -326,10 +365,12 @@ namespace Workstation.ServiceModel.Ua
             
             if (IsSelfSigned(target))
             {
+                X509CertificateParser parser = new X509CertificateParser();
+
                 // Create the selector that specifies the starting certificate
                 var selector = new X509CertStoreSelector()
                 {
-                    Certificate = target
+                    Certificate = parser.ReadCertificate(target.RawData)
                 };
                 IX509Store trustedCertStore = X509StoreFactory.Create("Certificate/Collection", new X509CollectionStoreParameters(trustedCerts));
                 if (trustedCertStore.GetMatches(selector).Count > 0)
@@ -356,14 +397,15 @@ namespace Workstation.ServiceModel.Ua
             return Task.FromResult(true);
         }
 
-        private static PkixCertPathBuilderResult VerifyCertificate(X509Certificate target, Org.BouncyCastle.Utilities.Collections.HashSet trustedRootCerts, Org.BouncyCastle.Utilities.Collections.HashSet intermediateCerts)
+        private static PkixCertPathBuilderResult VerifyCertificate(X509Certificate2 target, Org.BouncyCastle.Utilities.Collections.HashSet trustedRootCerts, Org.BouncyCastle.Utilities.Collections.HashSet intermediateCerts)
         {
             intermediateCerts.Add(target);
+            X509CertificateParser parser = new X509CertificateParser();
 
             // Create the selector that specifies the starting certificate
             var selector = new X509CertStoreSelector()
             {
-                Certificate = target
+                Certificate = parser.ReadCertificate(target.RawData)
             };
 
             // Create the trust anchors (set of root CA certificates)
@@ -391,18 +433,16 @@ namespace Workstation.ServiceModel.Ua
         }
 
         /// <summary>
-        /// Checks whether given <see cref="X509Certificate"/> is self-signed.
+        /// Checks whether given <see cref="X509Certificate2"/> is self-signed.
         /// </summary>
-        /// <param name="cert">an <see cref="X509Certificate"/>.</param>
+        /// <param name="cert">an <see cref="X509Certificate2"/>.</param>
         /// <returns>True, if self signed.</returns>
-        private static bool IsSelfSigned(X509Certificate cert)
+        private static bool IsSelfSigned(X509Certificate2 cert)
         {
             try
             {
-                // Try to verify certificate signature with its own public key
-                var key = cert.GetPublicKey();
-                cert.Verify(key);
-                return true;
+                // checks subject name compared to issuer name
+                return cert.SubjectName.RawData.SequenceEqual(cert.IssuerName.RawData);
             }
             catch (SignatureException)
             {
@@ -416,7 +456,7 @@ namespace Workstation.ServiceModel.Ua
             }
         }
 
-        private void StoreInRejectedFolder(X509Certificate crt)
+        private void StoreInRejectedFolder(X509Certificate2 crt)
         {
             var crtInfo = new FileInfo(Path.Combine(_pkiPath, "rejected", $"{crt.SerialNumber}.crt"));
             if (!crtInfo.Directory.Exists)

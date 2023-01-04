@@ -4,6 +4,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
@@ -30,113 +31,56 @@ namespace Workstation.ServiceModel.Ua
     /// </summary>
     public class WindowsCertificateStore : ICertificateStore
     {
-        private readonly string _pkiPath;
+        private readonly string _thumbprint;
+        private readonly StoreName _storeName;
+        private readonly StoreLocation _storeLocation;
         private readonly X509CertificateParser _certParser = new X509CertificateParser();
         private readonly SecureRandom _rng = new SecureRandom();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="DirectoryStore"/> class.
         /// </summary>
-        /// <param name="path">The path to the local pki directory.</param>
-        /// <param name="acceptAllRemoteCertificates">Set true to accept all remote certificates.</param>
-        /// <param name="createLocalCertificateIfNotExist">Set true to create a local certificate and private key, if the files do not exist.</param>
-        public WindowsCertificateStore(StoreName storeName, StoreLocation storeLocation)
+        /// <param name="storeName">The path to the local pki directory.</param>
+        /// <param name="storeLocation">Set true to accept all remote certificates.</param>
+        /// <param name="thumbprint">Set true to create a local certificate and private key, if the files do not exist.</param>
+        public WindowsCertificateStore(StoreName storeName, StoreLocation storeLocation, string thumbprint)
         {
-            //if (string.IsNullOrEmpty(path))
-            //{
-            //    throw new ArgumentNullException(nameof(path));
-            //}
+            if (string.IsNullOrEmpty(thumbprint))
+            {
+                throw new ArgumentNullException(nameof(thumbprint));
+            }
 
-            //_pkiPath = path;
-            //AcceptAllRemoteCertificates = acceptAllRemoteCertificates;
-            //CreateLocalCertificateIfNotExist = createLocalCertificateIfNotExist;
+            _storeName = storeName;
+            _storeLocation = storeLocation;
+            _thumbprint = thumbprint;
         }
 
-        /// <summary>
-        /// Gets a value indicating whether to accept all remote certificates.
-        /// </summary>
-        public bool AcceptAllRemoteCertificates { get; }
-
-        /// <summary>
-        /// Gets a value indicating whether to create a local certificate if it does not exist.
-        /// </summary>
-        public bool CreateLocalCertificateIfNotExist { get; }
-
         /// <inheritdoc/>
-        public async Task<(X509Certificate? Certificate, RsaKeyParameters? Key)> GetLocalCertificateAsync(ApplicationDescription applicationDescription, ILogger? logger = null, CancellationToken token = default)
+        public async Task<(X509Certificate2? Certificate, RsaKeyParameters? Key)> GetLocalCertificateAsync(ApplicationDescription applicationDescription, ILogger? logger = null, CancellationToken token = default)
         {
-            if (applicationDescription == null)
+            var crt = default(X509Certificate2);
+            X509Store store = new X509Store(_storeName, _storeLocation);
+
+            store.Open(OpenFlags.ReadOnly);
+
+            X509Certificate2Collection cerCollection = store.Certificates
+                .Find(X509FindType.FindByTemplateName, _thumbprint, true);
+
+            store.Close();
+
+            if (cerCollection.Count > 0)
             {
-                throw new ArgumentNullException(nameof(applicationDescription));
+                crt = cerCollection.OfType<X509Certificate2>().OrderBy(c => c.NotBefore).LastOrDefault();
+            }
+            else
+            {
+                throw new CryptographicException("Certificate Not found");
             }
 
-            string? applicationUri = applicationDescription.ApplicationUri;
-            if (string.IsNullOrEmpty(applicationUri))
-            {
-                throw new ArgumentOutOfRangeException(nameof(applicationDescription), "Expecting ApplicationUri in the form of 'http://{hostname}/{appname}' -or- 'urn:{hostname}:{appname}'.");
-            }
-
-            string? subjectName = null;
-            string? hostName = null;
-            string? appName = null;
-
-            UriBuilder appUri = new UriBuilder(applicationUri);
-            if (appUri.Scheme == "http" && !string.IsNullOrEmpty(appUri.Host))
-            {
-                var path = appUri.Path.Trim('/');
-                if (!string.IsNullOrEmpty(path))
-                {
-                    hostName = appUri.Host;
-                    appName = path;
-                    subjectName = $"CN={appName},DC={hostName}";
-                }
-            }
-
-            if (appUri.Scheme == "urn")
-            {
-                var parts = appUri.Path.Split(new[] { ':' }, 2);
-                if (parts.Length == 2)
-                {
-                    hostName = parts[0];
-                    appName = parts[1];
-                    subjectName = $"CN={appName},DC={hostName}";
-                }
-            }
-
-            if (subjectName == null)
-            {
-                throw new ArgumentOutOfRangeException(nameof(applicationDescription), "Expecting ApplicationUri in the form of 'http://{hostname}/{appname}' -or- 'urn:{hostname}:{appname}'.");
-            }
-
-            var crt = default(X509Certificate);
             var key = default(RsaKeyParameters);
 
-            // Build 'own/certs' certificate store.
-            var ownCerts = new Org.BouncyCastle.Utilities.Collections.HashSet();
-            var ownCertsInfo = new DirectoryInfo(Path.Combine(_pkiPath, "own", "certs"));
-            if (ownCertsInfo.Exists)
-            {
-                foreach (var info in ownCertsInfo.EnumerateFiles())
-                {
-                    using (var crtStream = info.OpenRead())
-                    {
-                        var c = _certParser.ReadCertificate(crtStream);
-                        if (c != null)
-                        {
-                            ownCerts.Add(c);
-                        }
-                    }
-                }
-            }
+            IX509Store ownCertStore = X509StoreFactory.Create("Certificate/Collection", new X509CollectionStoreParameters(cerCollection));
 
-            IX509Store ownCertStore = X509StoreFactory.Create("Certificate/Collection", new X509CollectionStoreParameters(ownCerts));
-
-            // Select the newest certificate that matches by subject name.
-            var selector = new X509CertStoreSelector()
-            {
-                Subject = new X509Name(subjectName)
-            };
-            crt = ownCertStore.GetMatches(selector).OfType<X509Certificate>().OrderBy(c => c.NotBefore).LastOrDefault();
             if (crt != null)
             {
                 // If certificate found, verify alt-name, and retrieve private key.
