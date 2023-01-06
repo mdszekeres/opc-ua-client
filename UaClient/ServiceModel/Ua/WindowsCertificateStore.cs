@@ -32,6 +32,7 @@ namespace Workstation.ServiceModel.Ua
     public class WindowsCertificateStore : ICertificateStore
     {
         private readonly string _thumbprint;
+        private readonly string _keyThumbprint;
         private readonly StoreName _storeName;
         private readonly StoreLocation _storeLocation;
         private readonly X509CertificateParser _certParser = new X509CertificateParser();
@@ -43,9 +44,9 @@ namespace Workstation.ServiceModel.Ua
         /// <param name="storeName">The path to the local pki directory.</param>
         /// <param name="storeLocation">Set true to accept all remote certificates.</param>
         /// <param name="thumbprint">Set true to create a local certificate and private key, if the files do not exist.</param>
-        public WindowsCertificateStore(StoreName storeName, StoreLocation storeLocation, string thumbprint)
+        public WindowsCertificateStore(StoreName storeName, StoreLocation storeLocation, string thumbprint, string keyThumbprint)
         {
-            if (string.IsNullOrEmpty(thumbprint))
+            if (string.IsNullOrEmpty(thumbprint) || string.IsNullOrEmpty(keyThumbprint))
             {
                 throw new ArgumentNullException(nameof(thumbprint));
             }
@@ -53,12 +54,13 @@ namespace Workstation.ServiceModel.Ua
             _storeName = storeName;
             _storeLocation = storeLocation;
             _thumbprint = thumbprint;
+            _keyThumbprint = keyThumbprint;
         }
 
         /// <inheritdoc/>
-        public async Task<(X509Certificate2? Certificate, RsaKeyParameters? Key)> GetLocalCertificateAsync(ApplicationDescription applicationDescription, ILogger? logger = null, CancellationToken token = default)
+        public async Task<(X509Certificate? Certificate, RsaKeyParameters? Key)> GetLocalCertificateAsync(ApplicationDescription applicationDescription, ILogger? logger = null, CancellationToken token = default)
         {
-            var crt = default(X509Certificate2);
+            var crt = default(X509Certificate);
             X509Store store = new X509Store(_storeName, _storeLocation);
 
             store.Open(OpenFlags.ReadOnly);
@@ -70,7 +72,9 @@ namespace Workstation.ServiceModel.Ua
 
             if (cerCollection.Count > 0)
             {
-                crt = cerCollection.OfType<X509Certificate2>().OrderBy(c => c.NotBefore).LastOrDefault();
+                X509CertificateParser parser = new X509CertificateParser();
+
+                crt = parser.ReadCertificate(cerCollection.OfType<X509Certificate2>().OrderBy(c => c.NotBefore).LastOrDefault().RawData);
             }
             else
             {
@@ -111,114 +115,115 @@ namespace Workstation.ServiceModel.Ua
             // If certificate and key are found, return to caller.
             if (crt != null && key != null)
             {
-                logger?.LogTrace($"Found certificate with subject alt name '{applicationUri}'.");
+                logger?.LogTrace($"Found certificate with thumbprint '{_thumbprint}'.");
+
                 return (crt, key);
             }
 
-            if (!CreateLocalCertificateIfNotExist)
-            {
-                return (null, null);
-            }
+            //if (!CreateLocalCertificateIfNotExist)
+            //{
+            return (null, null);
+            //}
 
-            // Create new certificate
-            var subjectDN = new X509Name(subjectName);
+            //// Create new certificate
+            //var subjectDN = new X509Name(subjectName);
 
-            // Create a keypair.
-            var kp = await Task.Run<AsymmetricCipherKeyPair>(() =>
-            {
-                RsaKeyPairGenerator kg = new RsaKeyPairGenerator();
-                kg.Init(new KeyGenerationParameters(_rng, 2048));
-                return kg.GenerateKeyPair();
-            });
+            //// Create a keypair.
+            //var kp = await Task.Run<AsymmetricCipherKeyPair>(() =>
+            //{
+            //    RsaKeyPairGenerator kg = new RsaKeyPairGenerator();
+            //    kg.Init(new KeyGenerationParameters(_rng, 2048));
+            //    return kg.GenerateKeyPair();
+            //});
 
-            key = kp.Private as RsaPrivateCrtKeyParameters;
+            //key = kp.Private as RsaPrivateCrtKeyParameters;
 
-            // Create a certificate.
-            X509V3CertificateGenerator cg = new X509V3CertificateGenerator();
-            var subjectSN = BigInteger.ProbablePrime(120, _rng);
-            cg.SetSerialNumber(subjectSN);
-            cg.SetSubjectDN(subjectDN);
-            cg.SetIssuerDN(subjectDN);
-            cg.SetNotBefore(DateTime.Now.Date.ToUniversalTime());
-            cg.SetNotAfter(DateTime.Now.Date.ToUniversalTime().AddYears(25));
-            cg.SetPublicKey(kp.Public);
+            //// Create a certificate.
+            //X509V3CertificateGenerator cg = new X509V3CertificateGenerator();
+            //var subjectSN = BigInteger.ProbablePrime(120, _rng);
+            //cg.SetSerialNumber(subjectSN);
+            //cg.SetSubjectDN(subjectDN);
+            //cg.SetIssuerDN(subjectDN);
+            //cg.SetNotBefore(DateTime.Now.Date.ToUniversalTime());
+            //cg.SetNotAfter(DateTime.Now.Date.ToUniversalTime().AddYears(25));
+            //cg.SetPublicKey(kp.Public);
 
-            cg.AddExtension(
-                X509Extensions.BasicConstraints.Id,
-                true,
-                new BasicConstraints(false));
+            //cg.AddExtension(
+            //    X509Extensions.BasicConstraints.Id,
+            //    true,
+            //    new BasicConstraints(false));
 
-            cg.AddExtension(
-                X509Extensions.SubjectKeyIdentifier.Id,
-                false,
-                new SubjectKeyIdentifier(SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(kp.Public)));
+            //cg.AddExtension(
+            //    X509Extensions.SubjectKeyIdentifier.Id,
+            //    false,
+            //    new SubjectKeyIdentifier(SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(kp.Public)));
 
-            cg.AddExtension(
-                X509Extensions.AuthorityKeyIdentifier.Id,
-                false,
-                new AuthorityKeyIdentifier(SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(kp.Public), new GeneralNames(new GeneralName(subjectDN)), subjectSN));
+            //cg.AddExtension(
+            //    X509Extensions.AuthorityKeyIdentifier.Id,
+            //    false,
+            //    new AuthorityKeyIdentifier(SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(kp.Public), new GeneralNames(new GeneralName(subjectDN)), subjectSN));
 
-            cg.AddExtension(
-                X509Extensions.SubjectAlternativeName,
-                false,
-                new GeneralNames(new[] { new GeneralName(GeneralName.UniformResourceIdentifier, applicationUri), new GeneralName(GeneralName.DnsName, hostName) }));
+            //cg.AddExtension(
+            //    X509Extensions.SubjectAlternativeName,
+            //    false,
+            //    new GeneralNames(new[] { new GeneralName(GeneralName.UniformResourceIdentifier, applicationUri), new GeneralName(GeneralName.DnsName, hostName) }));
 
-            cg.AddExtension(
-                X509Extensions.KeyUsage,
-                true,
-                new KeyUsage(KeyUsage.DataEncipherment | KeyUsage.DigitalSignature | KeyUsage.NonRepudiation | KeyUsage.KeyCertSign | KeyUsage.KeyEncipherment));
+            //cg.AddExtension(
+            //    X509Extensions.KeyUsage,
+            //    true,
+            //    new KeyUsage(KeyUsage.DataEncipherment | KeyUsage.DigitalSignature | KeyUsage.NonRepudiation | KeyUsage.KeyCertSign | KeyUsage.KeyEncipherment));
 
-            cg.AddExtension(
-                X509Extensions.ExtendedKeyUsage,
-                true,
-                new ExtendedKeyUsage(KeyPurposeID.IdKPClientAuth, KeyPurposeID.IdKPServerAuth));
+            //cg.AddExtension(
+            //    X509Extensions.ExtendedKeyUsage,
+            //    true,
+            //    new ExtendedKeyUsage(KeyPurposeID.IdKPClientAuth, KeyPurposeID.IdKPServerAuth));
 
-            crt = cg.Generate(new Asn1SignatureFactory("SHA256WITHRSA", key, _rng));
+            //crt = cg.Generate(new Asn1SignatureFactory("SHA256WITHRSA", key, _rng));
 
-            logger?.LogTrace($"Created certificate with subject alt name '{applicationUri}'.");
+            //logger?.LogTrace($"Created certificate with subject alt name '{applicationUri}'.");
 
-            var keyInfo = new FileInfo(Path.Combine(_pkiPath, "own", "private", $"{crt.SerialNumber}.key"));
-            if (!keyInfo.Directory.Exists)
-            {
-                Directory.CreateDirectory(keyInfo.DirectoryName);
-            }
-            else if (keyInfo.Exists)
-            {
-                keyInfo.Delete();
-            }
+            //var keyInfo = new FileInfo(Path.Combine(_pkiPath, "own", "private", $"{crt.SerialNumber}.key"));
+            //if (!keyInfo.Directory.Exists)
+            //{
+            //    Directory.CreateDirectory(keyInfo.DirectoryName);
+            //}
+            //else if (keyInfo.Exists)
+            //{
+            //    keyInfo.Delete();
+            //}
 
-            using (var keystream = new StreamWriter(keyInfo.OpenWrite()))
-            {
-                var pemwriter = new PemWriter(keystream);
-                pemwriter.WriteObject(key);
-            }
+            //using (var keystream = new StreamWriter(keyInfo.OpenWrite()))
+            //{
+            //    var pemwriter = new PemWriter(keystream);
+            //    pemwriter.WriteObject(key);
+            //}
 
-            var crtInfo = new FileInfo(Path.Combine(_pkiPath, "own", "certs", $"{crt.SerialNumber}.crt"));
-            if (!crtInfo.Directory.Exists)
-            {
-                Directory.CreateDirectory(crtInfo.DirectoryName);
-            }
-            else if (crtInfo.Exists)
-            {
-                crtInfo.Delete();
-            }
+            //var crtInfo = new FileInfo(Path.Combine(_pkiPath, "own", "certs", $"{crt.SerialNumber}.crt"));
+            //if (!crtInfo.Directory.Exists)
+            //{
+            //    Directory.CreateDirectory(crtInfo.DirectoryName);
+            //}
+            //else if (crtInfo.Exists)
+            //{
+            //    crtInfo.Delete();
+            //}
 
-            using (var crtstream = new StreamWriter(crtInfo.OpenWrite()))
-            {
-                var pemwriter = new PemWriter(crtstream);
-                pemwriter.WriteObject(crt);
-            }
+            //using (var crtstream = new StreamWriter(crtInfo.OpenWrite()))
+            //{
+            //    var pemwriter = new PemWriter(crtstream);
+            //    pemwriter.WriteObject(crt);
+            //}
 
-            return (crt, key);
+            //return (crt, key);
         }
 
         /// <inheritdoc/>
         public Task<bool> ValidateRemoteCertificateAsync(X509Certificate target, ILogger? logger = null, CancellationToken token = default)
         {
-            if (AcceptAllRemoteCertificates)
-            {
-                return Task.FromResult(true);
-            }
+            //if (AcceptAllRemoteCertificates)
+            //{
+            //    return Task.FromResult(true);
+            //}
             
             if (target == null)
             {
@@ -228,47 +233,36 @@ namespace Workstation.ServiceModel.Ua
             if (!target.IsValidNow)
             {
                 logger?.LogError($"Error validatingRemoteCertificate. Certificate is expired or not yet valid.");
-                StoreInRejectedFolder(target);
                 return Task.FromResult(false);
             }
 
             var trustedCerts = new Org.BouncyCastle.Utilities.Collections.HashSet();
-            var trustedCertsInfo = new DirectoryInfo(Path.Combine(_pkiPath, "trusted"));
-            if (!trustedCertsInfo.Exists)
-            {
-                trustedCertsInfo.Create();
-            }
 
-            foreach (var info in trustedCertsInfo.EnumerateFiles())
-            {
-                using (var crtStream = info.OpenRead())
-                {
-                    var crt = _certParser.ReadCertificate(crtStream);
-                    if (crt != null)
-                    {
-                        trustedCerts.Add(crt);
-                    }
-                }
-            }
+            //foreach (var info in trustedCertsInfo.EnumerateFiles())
+            //{
+            //    using (var crtStream = info.OpenRead())
+            //    {
+            //        var crt = _certParser.ReadCertificate(crtStream);
+            //        if (crt != null)
+            //        {
+            //            trustedCerts.Add(crt);
+            //        }
+            //    }
+            //}
 
             var intermediateCerts = new Org.BouncyCastle.Utilities.Collections.HashSet();
-            var intermediateCertsInfo = new DirectoryInfo(Path.Combine(_pkiPath, "issuer"));
-            if (!intermediateCertsInfo.Exists)
-            {
-                intermediateCertsInfo.Create();
-            }
 
-            foreach (var info in intermediateCertsInfo.EnumerateFiles())
-            {
-                using (var crtStream = info.OpenRead())
-                {
-                    var crt = _certParser.ReadCertificate(crtStream);
-                    if (crt != null)
-                    {
-                        intermediateCerts.Add(crt);
-                    }
-                }
-            }
+            //foreach (var info in intermediateCertsInfo.EnumerateFiles())
+            //{
+            //    using (var crtStream = info.OpenRead())
+            //    {
+            //        var crt = _certParser.ReadCertificate(crtStream);
+            //        if (crt != null)
+            //        {
+            //            intermediateCerts.Add(crt);
+            //        }
+            //    }
+            //}
             
             if (IsSelfSigned(target))
             {
@@ -284,7 +278,6 @@ namespace Workstation.ServiceModel.Ua
                 }
 
                 logger?.LogError($"Error validatingRemoteCertificate.");
-                StoreInRejectedFolder(target);
                 return Task.FromResult(false);
             }
 
@@ -295,7 +288,6 @@ namespace Workstation.ServiceModel.Ua
             catch (Exception ex)
             {
                 logger?.LogError($"Error validatingRemoteCertificate. {ex.Message}");
-                StoreInRejectedFolder(target);
                 return Task.FromResult(false);
             }
 
@@ -359,25 +351,6 @@ namespace Workstation.ServiceModel.Ua
             {
                 // Invalid key --> not self-signed
                 return false;
-            }
-        }
-
-        private void StoreInRejectedFolder(X509Certificate crt)
-        {
-            var crtInfo = new FileInfo(Path.Combine(_pkiPath, "rejected", $"{crt.SerialNumber}.crt"));
-            if (!crtInfo.Directory.Exists)
-            {
-                Directory.CreateDirectory(crtInfo.DirectoryName);
-            }
-            else if (crtInfo.Exists)
-            {
-                crtInfo.Delete();
-            }
-
-            using (var crtstream = new StreamWriter(crtInfo.OpenWrite()))
-            {
-                var pemwriter = new PemWriter(crtstream);
-                pemwriter.WriteObject(crt);
             }
         }
     }
