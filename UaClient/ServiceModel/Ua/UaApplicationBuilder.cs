@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
@@ -98,14 +99,14 @@ namespace Workstation.ServiceModel.Ua
         /// <param name="storeLocation"></param>
         /// <param name="thumbprint"></param>
         /// <returns></returns>
-        public UaApplicationBuilder SetWindowsCertificateStore(StoreName storeName, StoreLocation storeLocation, string thumbprint)
+        public UaApplicationBuilder SetWindowsCertificateStore(WindowsCertificate clientCertificate, WindowsCertificate trustedCertificate, WindowsCertificate issuerCertificate)
         {
-            if (string.IsNullOrEmpty(thumbprint))
+            if (!clientCertificate.thumbprints.Any())
             {
-                throw new ArgumentNullException(nameof(thumbprint));
+                throw new ArgumentNullException(nameof(clientCertificate.thumbprints));
             }
 
-            this.certificateStore = new WindowsCertificateStore(storeName, storeLocation, thumbprint);
+            this.certificateStore = new WindowsCertificateStore(clientCertificate, trustedCertificate, issuerCertificate);
             return this;
         }
 
