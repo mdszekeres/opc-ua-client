@@ -273,7 +273,7 @@ namespace Workstation.ServiceModel.Ua
             {
                 return Task.FromResult(true);
             }
-            
+
             if (target == null)
             {
                 throw new ArgumentNullException(nameof(target));
@@ -323,7 +323,7 @@ namespace Workstation.ServiceModel.Ua
                     }
                 }
             }
-            
+
             if (IsSelfSigned(target))
             {
                 // Create the selector that specifies the starting certificate
