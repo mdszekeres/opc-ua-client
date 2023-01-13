@@ -140,31 +140,37 @@ namespace Workstation.ServiceModel.Ua
             X509Store trustedStore = new X509Store(_trustedCertificate.StoreName, _trustedCertificate.StoreLocation);
             trustedStore.Open(OpenFlags.ReadOnly);
 
-            X509Certificate2Collection trustedCerCollection = trustedStore.Certificates
-                .Find(X509FindType.FindByTemplateName, _trustedCertificate.thumbprints, true);
+            foreach (var thumbThumbprint in _trustedCertificate.thumbprints)
+            {
+                X509Certificate2Collection trustedCerCollection = trustedStore.Certificates
+                    .Find(X509FindType.FindByTemplateName, thumbThumbprint, true);
+
+                foreach (var trustedCert in trustedCerCollection)
+                {
+                    var trustedCrt = _certParser.ReadCertificate(trustedCert.RawData);
+                    trustedCerts.Add(trustedCrt);
+                }
+            }
 
             trustedStore.Close();
-
-            foreach (var trustedCert in trustedCerCollection)
-            {
-                var trustedCrt = _certParser.ReadCertificate(trustedCert.RawData);
-                trustedCerts.Add(trustedCrt);
-            }
 
             var intermediateCerts = new Org.BouncyCastle.Utilities.Collections.HashSet();
             X509Store issuerStore = new X509Store(_issuerCertificate.StoreName, _issuerCertificate.StoreLocation);
             issuerStore.Open(OpenFlags.ReadOnly);
 
-            X509Certificate2Collection issuerCerCollection = issuerStore.Certificates
-                .Find(X509FindType.FindByTemplateName, _issuerCertificate.thumbprints, true);
+            foreach (var thumbThumbprint in _trustedCertificate.thumbprints)
+            {
+                X509Certificate2Collection issuerCerCollection = issuerStore.Certificates
+                    .Find(X509FindType.FindByTemplateName, thumbThumbprint, true);
+
+                foreach (var issuerCert in issuerCerCollection)
+                {
+                    var issuerCrt = _certParser.ReadCertificate(issuerCert.RawData);
+                    intermediateCerts.Add(issuerCrt);
+                }
+            }
 
             issuerStore.Close();
-
-            foreach (var issuerCert in issuerCerCollection)
-            {
-                var issuerCrt = _certParser.ReadCertificate(issuerCert.RawData);
-                intermediateCerts.Add(issuerCrt);
-            }
 
             if (IsSelfSigned(target))
             {
