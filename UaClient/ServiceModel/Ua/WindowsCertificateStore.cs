@@ -143,7 +143,7 @@ namespace Workstation.ServiceModel.Ua
             foreach (var thumbThumbprint in _trustedCertificate.thumbprints)
             {
                 X509Certificate2Collection trustedCerCollection = trustedStore.Certificates
-                    .Find(X509FindType.FindByTemplateName, thumbThumbprint, true);
+                    .Find(X509FindType.FindByThumbprint, thumbThumbprint, true);
 
                 foreach (var trustedCert in trustedCerCollection)
                 {
@@ -161,7 +161,7 @@ namespace Workstation.ServiceModel.Ua
             foreach (var thumbThumbprint in _trustedCertificate.thumbprints)
             {
                 X509Certificate2Collection issuerCerCollection = issuerStore.Certificates
-                    .Find(X509FindType.FindByTemplateName, thumbThumbprint, true);
+                    .Find(X509FindType.FindByThumbprint, thumbThumbprint, true);
 
                 foreach (var issuerCert in issuerCerCollection)
                 {
