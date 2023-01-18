@@ -18,7 +18,7 @@ namespace Workstation.ServiceModel.Ua
         /// <summary>
         /// Gets the local certificate and private key.
         /// </summary>
-        /// <param name="applicationDescription">The application description.</param>
+        /// <param name="applicationDescription">The application description. Not used when using the windows certificate store</param>
         /// <param name="logger">The logger.</param>
         /// <returns>The local certificate and private key.</returns>
         Task<(X509Certificate? Certificate, RsaKeyParameters? Key)> GetLocalCertificateAsync(ApplicationDescription applicationDescription, ILogger? logger, System.Threading.CancellationToken token);

@@ -53,6 +53,10 @@ namespace Workstation.ServiceModel.Ua
         /// <param name="issuerCertificate">Set true to create a local certificate and private key, if the files do not exist.</param>
         public WindowsCertificateStore(WindowsCertificate clientCertificate, WindowsCertificate trustedCertificate, WindowsCertificate issuerCertificate)
         {
+            if (clientCertificate is null)
+            {
+                throw new NullReferenceException();
+            }
             if (!clientCertificate.thumbprints.Any())
             {
                 throw new ArgumentNullException(nameof(clientCertificate.thumbprints));
@@ -77,7 +81,7 @@ namespace Workstation.ServiceModel.Ua
             store.Open(OpenFlags.ReadOnly);
 
             X509Certificate2Collection cerCollection = store.Certificates
-                .Find(X509FindType.FindByTemplateName, _clientCertificate.thumbprints.First(), true);
+                .Find(X509FindType.FindByThumbprint, _clientCertificate.thumbprints.First().ToUpper(), true);
 
             store.Close();
 
@@ -92,7 +96,7 @@ namespace Workstation.ServiceModel.Ua
 
             var key = default(RsaKeyParameters);
 
-            IX509Store ownCertStore = X509StoreFactory.Create("Certificate/Collection", new X509CollectionStoreParameters(cerCollection));
+            //IX509Store ownCertStore = X509StoreFactory.Create("Certificate/Collection", new X509CollectionStoreParameters(cerCollection));
 
             if (crt != null)
             {

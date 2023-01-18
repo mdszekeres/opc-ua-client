@@ -1,208 +1,149 @@
-﻿//using FluentAssertions;
-//using System;
-//using System.Collections.Generic;
-//using System.IO;
-//using System.Runtime.CompilerServices;
-//using System.Text;
-//using System.Threading.Tasks;
-//using Workstation.ServiceModel.Ua;
-//using Xunit;
+﻿using FluentAssertions;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Threading.Tasks;
+using Workstation.ServiceModel.Ua;
+using Xunit;
 
-//namespace Workstation.UaClient.UnitTests
-//{
-//    public class WindowsCertificateStoreTests
-//    {
-//        [Fact]
-//        public void Constructor()
-//        {
-//            var store = new WindowsCertificateStore();
-//        }
+namespace Workstation.UaClient.UnitTests
+{
+    public class WindowsCertificateStoreTests
+    {
+        // These will need to be filled in with your own test values to test correctly.
+        #region Test Certificates
 
-//        [InlineData(null)]
-//        [InlineData("")]
-//        [Theory]
-//        public void ConstructorNull(string dir)
-//        {
-//            dir.Invoking(d => new WindowsCertificateStore(d))
-//                .Should().Throw<ArgumentNullException>();
-//        }
+        private WindowsCertificate testClientWindowsCertificate = new WindowsCertificate()
+        {
+            StoreLocation = StoreLocation.LocalMachine,
+            StoreName = StoreName.My,
+            thumbprints = new List<string>()
+            {
+                "f276ebdc5317e64b77f6e890a29a4b3c30364eb5"
+            }
+        };
 
-//        [Fact]
-//        public async Task InvalidApplicationDescription()
-//        {
-//            var store = new WindowsCertificateStore();
+        private WindowsCertificate testTrustedWindowsCertificate = new WindowsCertificate()
+        {
+            StoreLocation = StoreLocation.LocalMachine,
+            StoreName = StoreName.My,
+            thumbprints = new List<string>()
+            {
+                "dd6c14a3f78197c15b2c085e0ff64646018cb59d",
+                "2fb9918ca1d7214706ebac36496a897ff2bb591d"
+            }
+        };
 
-//            await store.Invoking(s => s.GetLocalCertificateAsync(null))
-//                .Should().ThrowAsync<ArgumentNullException>();
-//        }
+        private WindowsCertificate testIssuerWindowsCertificate = new WindowsCertificate()
+        {
+            StoreLocation = StoreLocation.LocalMachine,
+            StoreName = StoreName.My,
+            thumbprints = new List<string>()
+            {
+                ""
+            }
+        };
 
-//        [InlineData(null)]
-//        [InlineData("https://hostname/appname")]
-//        [InlineData("urn://hostname/appname")]
-//        [InlineData("http://hostname/")]
-//        [InlineData("")]
-//        [InlineData("hostname:appname")]
-//        [Theory]
-//        public async Task InvalidApplicationUri(string uri)
-//        {
-//            var store = new WindowsCertificateStore();
+        #endregion
 
-//            var app = new ApplicationDescription
-//            {
-//                ApplicationUri = uri,
-//            };
+        [InlineData(null)]
+        [Theory]
+        public void ConstructorNull(WindowsCertificate testCertificate)
+        {
+            testCertificate.Invoking(testCert =>
+                new WindowsCertificateStore(testCert, testTrustedWindowsCertificate, testIssuerWindowsCertificate))
+                .Should().Throw<NullReferenceException>();
+        }
 
-//            await store.Invoking(s => s.GetLocalCertificateAsync(app))
-//                .Should().ThrowAsync<ArgumentOutOfRangeException>();
-//        }
+        [Fact]
+        public void ConstructorMissingThumbprint()
+        {
+            WindowsCertificate testCertificate = new WindowsCertificate();
 
-//        [Fact]
-//        public async Task LoadCertificate()
-//        {
-//            using (var dir = TempDirectory.Create())
-//            {
-//                var store = new WindowsCertificateStore();
+            testCertificate.Invoking(testCert =>
+                    new WindowsCertificateStore(testCert, testTrustedWindowsCertificate, testIssuerWindowsCertificate))
+                .Should().Throw<ArgumentNullException>();
+        }
 
-//                var app = new ApplicationDescription
-//                {
-//                    ApplicationUri = "urn:hostname:appname",
-//                };
+        [Fact]
+        public void ConstructorClientCertOverload()
+        {
+            WindowsCertificate overloadedClientCert = new WindowsCertificate()
+            {
+                StoreLocation = StoreLocation.LocalMachine,
+                StoreName = StoreName.My,
+                thumbprints = new List<string>()
+                {
+                    "1234",
+                    "431"
+                }
+            };
 
-//                var (cert1, key1) = await store.GetLocalCertificateAsync(app);
-//                var (cert2, key2) = await store.GetLocalCertificateAsync(app);
+            overloadedClientCert.Invoking(testCert =>
+                    new WindowsCertificateStore(testCert, testTrustedWindowsCertificate, testIssuerWindowsCertificate))
+                .Should().Throw<ArgumentException>();
+        }
 
-//                cert1
-//                    .Should().Be(cert2);
+        [Fact]
+        public async Task LoadCertificate()
+        {
+            var store = new WindowsCertificateStore(testClientWindowsCertificate, testTrustedWindowsCertificate, testIssuerWindowsCertificate);
 
-//                key1
-//                    .Should().Be(key2);
-//            }
-//        }
+            var app = new ApplicationDescription
+            {
+                ApplicationUri = "urn:hostname:appname",
+            };
 
-//        //[Fact]
-//        //public async Task ValidateCertificateAcceptAll()
-//        //{
-//        //    using (var dir = TempDirectory.Create())
-//        //    {
-//        //        var store = new WindowsCertificateStore();
+            var (cert1, key1) = await store.GetLocalCertificateAsync(app);
+            var (cert2, key2) = await store.GetLocalCertificateAsync(app);
 
-//        //        var ret = await store.ValidateRemoteCertificateAsync(null);
+            cert1
+                .Should().Be(cert2);
 
-//        //        ret
-//        //            .Should().BeTrue();
-//        //    }
-//        //}
-        
-//        [Fact]
-//        public async Task ValidateCertificateNull()
-//        {
-//            using (var dir = TempDirectory.Create())
-//            {
-//                var store = new DirectoryStore(dir.Name, acceptAllRemoteCertificates: false);
+            key1
+                .Should().Be(key2);
+        }
 
-//                await store.Invoking(s => s.ValidateRemoteCertificateAsync(null))
-//                    .Should().ThrowAsync<ArgumentNullException>();
-//            }
-//        }
+        //[Fact]
+        //public async Task ValidateCertificateAcceptAll()
+        //{
+        //    var store = new WindowsCertificateStore(testClientWindowsCertificate, testTrustedWindowsCertificate, testIssuerWindowsCertificate);
 
-//        [Fact]
-//        public async Task ValidateCertificateNotExisting()
-//        {
-//            using (var dirServer = TempDirectory.Create("Server"))
-//            using (var dirClient = TempDirectory.Create("Client", false))
-//            {
-//                var storeServer = new DirectoryStore(dirServer.Name, createLocalCertificateIfNotExist: true);
-//                var storeClient = new DirectoryStore(dirClient.Name, acceptAllRemoteCertificates: false);
+        //    var ret = await store.ValidateRemoteCertificateAsync(null);
 
-//                var server = new ApplicationDescription
-//                {
-//                    ApplicationUri = "http://hostname/server",
-//                };
+        //    ret
+        //        .Should().BeTrue();
+        //}
 
-//                // First we create a certificate
-//                var (cert, _) = await storeServer.GetLocalCertificateAsync(server);
+        [Fact]
+        public async Task ValidateCertificateNull()
+        {
+            var store = new WindowsCertificateStore(testClientWindowsCertificate, testTrustedWindowsCertificate, testIssuerWindowsCertificate);
 
-//                // The certificate is not in the expected directory
-//                // hence it should not be accepted
-//                var ret = await storeClient.ValidateRemoteCertificateAsync(cert);
-//                ret
-//                    .Should().BeFalse();
-                
-//                Directory.EnumerateFiles(dirClient.Name + @"/rejected")
-//                    .Should().HaveCount(1);
-//            }
-//        }
+            await store.Invoking(s => s.ValidateRemoteCertificateAsync(null))
+                    .Should().ThrowAsync<ArgumentNullException>();
+        }
 
-//        [Fact]
-//        public async Task ValidateCertificateExisting()
-//        {
-//            using (var dirServer = TempDirectory.Create("Server"))
-//            using (var dirClient = TempDirectory.Create("Client"))
-//            {
-//                var storeServer = new DirectoryStore(dirServer.Name, createLocalCertificateIfNotExist: true);
-//                var storeClient = new DirectoryStore(dirClient.Name, acceptAllRemoteCertificates: false);
+        [Fact]
+        public async Task ValidateCertificateExisting()
+        {
+            var storeServer = new WindowsCertificateStore(testClientWindowsCertificate, testTrustedWindowsCertificate, testIssuerWindowsCertificate);
+            var storeClient = new WindowsCertificateStore(testClientWindowsCertificate, testTrustedWindowsCertificate, testIssuerWindowsCertificate);
 
-//                var server = new ApplicationDescription
-//                {
-//                    ApplicationUri = "http://hostname/server",
-//                };
+            var server = new ApplicationDescription
+            {
+                ApplicationUri = "http://hostname/server",
+            };
 
-//                // First we create a certificate
-//                var (cert, _) = await storeServer.GetLocalCertificateAsync(server);
+            var (cert, _) = await storeServer.GetLocalCertificateAsync(server);
 
-//                CopyAll(dirServer.Name + @"/own/certs", dirClient.Name + @"/trusted");
-
-//                // The certificate is now in the expected directory
-//                // hence it should be accepted
-//                var ret = await storeClient.ValidateRemoteCertificateAsync(cert);
-//                ret
-//                    .Should().BeTrue();
-//            }
-//        }
-        
-//        private static void CopyAll(string source, string destination)
-//        {
-//            Directory.CreateDirectory(destination);
-
-//            foreach (var file in Directory.EnumerateFiles(source))
-//            {
-//                File.Copy(file, Path.Combine(destination, Path.GetFileName(file)));
-//            }
-//        }
-
-//        class TempDirectory : IDisposable
-//        {
-//            static public TempDirectory Create(string suffix = "", bool deleteOnDispose = true, [CallerMemberName]string name = null)
-//            {
-//                var path = name + suffix;
-//                DeleteRecursive(path);
-//                return new TempDirectory(path, deleteOnDispose);
-//            }
-
-//            static private void DeleteRecursive(string name)
-//            {
-//                if (Directory.Exists(name))
-//                {
-//                    Directory.Delete(name, recursive: true);
-//                }
-//            }
-
-//            public string Name { get; }
-//            public bool DeleteOnDispose { get; }
-
-//            private TempDirectory(string name, bool deleteOnDispose)
-//            {
-//                this.Name = name;
-//                this.DeleteOnDispose = deleteOnDispose;
-//            }
-
-//            public void Dispose()
-//            {
-//                if (this.DeleteOnDispose)
-//                {
-//                    DeleteRecursive(this.Name);
-//                }
-//            }
-//        }
-//    }
-//}
+            // hence it should be accepted
+            var ret = await storeClient.ValidateRemoteCertificateAsync(cert);
+            ret
+                .Should().BeTrue();
+        }
+    }
+}
