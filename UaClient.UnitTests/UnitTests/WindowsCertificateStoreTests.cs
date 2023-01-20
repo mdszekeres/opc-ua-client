@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -16,17 +17,17 @@ namespace Workstation.UaClient.UnitTests
         // These will need to be filled in with your own test values to test correctly.
         #region Test Certificates
 
-        private WindowsCertificate testClientWindowsCertificate = new WindowsCertificate()
+        private WindowsCertificate testClientWindowsCertificate = new WindowsCertificate
         {
             StoreLocation = StoreLocation.LocalMachine,
             StoreName = StoreName.My,
             thumbprints = new List<string>()
             {
-                "f276ebdc5317e64b77f6e890a29a4b3c30364eb5"
+                "6319842ed55d0b8b6e3a5c394aa5076bf29c140b"
             }
         };
 
-        private WindowsCertificate testTrustedWindowsCertificate = new WindowsCertificate()
+        private WindowsCertificate testTrustedWindowsCertificate = new WindowsCertificate
         {
             StoreLocation = StoreLocation.LocalMachine,
             StoreName = StoreName.My,
@@ -37,7 +38,7 @@ namespace Workstation.UaClient.UnitTests
             }
         };
 
-        private WindowsCertificate testIssuerWindowsCertificate = new WindowsCertificate()
+        private WindowsCertificate testIssuerWindowsCertificate = new WindowsCertificate
         {
             StoreLocation = StoreLocation.LocalMachine,
             StoreName = StoreName.My,
@@ -130,8 +131,10 @@ namespace Workstation.UaClient.UnitTests
         [Fact]
         public async Task ValidateCertificateExisting()
         {
+            // certificate with private key will be your server client
+            // and your clients server certificate
             var storeServer = new WindowsCertificateStore(testClientWindowsCertificate, testTrustedWindowsCertificate, testIssuerWindowsCertificate);
-            var storeClient = new WindowsCertificateStore(testClientWindowsCertificate, testTrustedWindowsCertificate, testIssuerWindowsCertificate);
+            var storeClient = new WindowsCertificateStore(testClientWindowsCertificate, testClientWindowsCertificate, testIssuerWindowsCertificate);
 
             var server = new ApplicationDescription
             {

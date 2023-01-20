@@ -42,6 +42,7 @@ namespace Workstation.ServiceModel.Ua
         private readonly WindowsCertificate _clientCertificate;
         private readonly WindowsCertificate _trustedCertificate;
         private readonly WindowsCertificate _issuerCertificate;
+        private readonly bool _validOnly;
         private readonly X509CertificateParser _certParser = new X509CertificateParser();
         private readonly SecureRandom _rng = new SecureRandom();
 
@@ -70,6 +71,7 @@ namespace Workstation.ServiceModel.Ua
             _clientCertificate = clientCertificate;
             _trustedCertificate = trustedCertificate;
             _issuerCertificate = issuerCertificate;
+            _validOnly = false;
         }
 
         /// <inheritdoc/>
@@ -81,7 +83,7 @@ namespace Workstation.ServiceModel.Ua
             store.Open(OpenFlags.ReadOnly);
 
             X509Certificate2Collection cerCollection = store.Certificates
-                .Find(X509FindType.FindByThumbprint, _clientCertificate.thumbprints.First().ToUpper(), true);
+                .Find(X509FindType.FindByThumbprint, _clientCertificate.thumbprints.First().ToUpper(), _validOnly);
 
             store.Close();
 
@@ -96,13 +98,11 @@ namespace Workstation.ServiceModel.Ua
 
             var key = default(RsaKeyParameters);
 
-            //IX509Store ownCertStore = X509StoreFactory.Create("Certificate/Collection", new X509CollectionStoreParameters(cerCollection));
-
             if (crt != null)
             {
                 if (crt.HasPrivateKey)
                 {
-                    var keyParameter = TransformRSAPrivateKey(crt.PrivateKey);
+                    var keyParameter = TransformRSAPrivateKey(crt);
                     key = keyParameter as RsaKeyParameters;
                 }
             }
@@ -147,7 +147,7 @@ namespace Workstation.ServiceModel.Ua
             foreach (var thumbThumbprint in _trustedCertificate.thumbprints)
             {
                 X509Certificate2Collection trustedCerCollection = trustedStore.Certificates
-                    .Find(X509FindType.FindByThumbprint, thumbThumbprint, true);
+                    .Find(X509FindType.FindByThumbprint, thumbThumbprint, false);
 
                 foreach (var trustedCert in trustedCerCollection)
                 {
@@ -162,10 +162,10 @@ namespace Workstation.ServiceModel.Ua
             X509Store issuerStore = new X509Store(_issuerCertificate.StoreName, _issuerCertificate.StoreLocation);
             issuerStore.Open(OpenFlags.ReadOnly);
 
-            foreach (var thumbThumbprint in _trustedCertificate.thumbprints)
+            foreach (var thumbThumbprint in _issuerCertificate.thumbprints)
             {
                 X509Certificate2Collection issuerCerCollection = issuerStore.Certificates
-                    .Find(X509FindType.FindByThumbprint, thumbThumbprint, true);
+                    .Find(X509FindType.FindByThumbprint, thumbThumbprint, false);
 
                 foreach (var issuerCert in issuerCerCollection)
                 {
@@ -272,10 +272,11 @@ namespace Workstation.ServiceModel.Ua
         /// <param name="privateKey"></param>
         /// <returns></returns>
         private static AsymmetricKeyParameter TransformRSAPrivateKey(
-            AsymmetricAlgorithm privateKey)
+            X509Certificate2 certificate)
         {
-            RSACryptoServiceProvider prov = privateKey as RSACryptoServiceProvider;
-            RSAParameters parameters = prov.ExportParameters(true);
+            var privateKey = certificate.GetRSAPrivateKey();
+
+            RSAParameters parameters = privateKey.ExportParameters(true);
 
             return new RsaPrivateCrtKeyParameters(
                 new BigInteger(1, parameters.Modulus),
