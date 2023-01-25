@@ -23,7 +23,7 @@ namespace Workstation.UaClient.UnitTests
             StoreName = StoreName.My,
             thumbprints = new List<string>()
             {
-                "6319842ed55d0b8b6e3a5c394aa5076bf29c140b"
+                ""
             }
         };
 
@@ -33,8 +33,8 @@ namespace Workstation.UaClient.UnitTests
             StoreName = StoreName.My,
             thumbprints = new List<string>()
             {
-                "dd6c14a3f78197c15b2c085e0ff64646018cb59d",
-                "2fb9918ca1d7214706ebac36496a897ff2bb591d"
+                "",
+                ""
             }
         };
 
