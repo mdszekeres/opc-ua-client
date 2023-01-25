@@ -1,4 +1,5 @@
-﻿// Copyright (c) Converter Systems LLC. All rights reserved.
+﻿
+// Copyright (c) Converter Systems LLC. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 using System;
@@ -23,6 +24,7 @@ using Org.BouncyCastle.Security.Certificates;
 using Org.BouncyCastle.X509;
 using Org.BouncyCastle.X509.Extension;
 using Org.BouncyCastle.X509.Store;
+using PemReader = Org.BouncyCastle.Utilities.IO.Pem.PemReader;
 using X509Certificate = Org.BouncyCastle.X509.X509Certificate;
 
 namespace Workstation.ServiceModel.Ua
@@ -42,7 +44,6 @@ namespace Workstation.ServiceModel.Ua
         private readonly WindowsCertificate _clientCertificate;
         private readonly WindowsCertificate _trustedCertificate;
         private readonly WindowsCertificate _issuerCertificate;
-        private readonly bool _validOnly;
         private readonly X509CertificateParser _certParser = new X509CertificateParser();
         private readonly SecureRandom _rng = new SecureRandom();
 
@@ -71,7 +72,6 @@ namespace Workstation.ServiceModel.Ua
             _clientCertificate = clientCertificate;
             _trustedCertificate = trustedCertificate;
             _issuerCertificate = issuerCertificate;
-            _validOnly = false;
         }
 
         /// <inheritdoc/>
@@ -79,16 +79,17 @@ namespace Workstation.ServiceModel.Ua
         {
             var crt = default(X509Certificate2);
             X509Store store = new X509Store(_clientCertificate.StoreName, _clientCertificate.StoreLocation);
-
+            
             store.Open(OpenFlags.ReadOnly);
 
             X509Certificate2Collection cerCollection = store.Certificates
-                .Find(X509FindType.FindByThumbprint, _clientCertificate.thumbprints.First().ToUpper(), _validOnly);
+                .Find(X509FindType.FindByThumbprint, _clientCertificate.thumbprints.First().ToUpper(), false);
 
             store.Close();
 
             if (cerCollection.Count > 0)
             {
+                // This takes the latest certificate found if there are mutliples that are not expired and match the thumb print.
                 crt = cerCollection.OfType<X509Certificate2>().OrderBy(c => c.NotBefore).LastOrDefault();
             }
             else
@@ -149,6 +150,7 @@ namespace Workstation.ServiceModel.Ua
                 X509Certificate2Collection trustedCerCollection = trustedStore.Certificates
                     .Find(X509FindType.FindByThumbprint, thumbThumbprint, false);
 
+                // Loads found certs into the trusted list
                 foreach (var trustedCert in trustedCerCollection)
                 {
                     var trustedCrt = _certParser.ReadCertificate(trustedCert.RawData);
@@ -167,6 +169,7 @@ namespace Workstation.ServiceModel.Ua
                 X509Certificate2Collection issuerCerCollection = issuerStore.Certificates
                     .Find(X509FindType.FindByThumbprint, thumbThumbprint, false);
 
+                // Loads found certs into the intermediate list
                 foreach (var issuerCert in issuerCerCollection)
                 {
                     var issuerCrt = _certParser.ReadCertificate(issuerCert.RawData);
